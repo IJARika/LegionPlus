@@ -1258,13 +1258,14 @@ namespace vvd
 		float x, y, z, w;
 	};
 
+
 	struct mstudioweightextra_t
 	{
 		short weight[3]; // value divided by 32767.0
 
 		short pad; // likely alignment
 
-		int extraweightindex;
+		int extraweightindex; // base index for vvw, add (weightIdx - 3)
 	};
 
 	struct mstudioboneweight_t
@@ -1272,7 +1273,7 @@ namespace vvd
 		union
 		{
 			float	weight[MAX_NUM_BONES_PER_VERT];
-			mstudioweightextra_t weightextra;
+			mstudioweightextra_t weightextra; // only in apex (v54)
 		};
 
 		unsigned char bone[MAX_NUM_BONES_PER_VERT]; // set to unsigned so we can read it
@@ -1309,17 +1310,17 @@ namespace vvd
 		int vertexDataStart; // offset from base to vertex block
 		int tangentDataStart; // offset from base to tangent block
 
-		vertexFileFixup_t* fixup(int i)
+		vertexFileFixup_t* GetFixupData(int i) const
 		{
 			return reinterpret_cast<vertexFileFixup_t*>((char*)this + fixupTableStart) + i;
 		}
 
-		mstudiovertex_t* vertex(int i)
+		mstudiovertex_t* GetVertexData(int i) const
 		{
 			return reinterpret_cast<mstudiovertex_t*>((char*)this + vertexDataStart) + i;
 		}
 
-		Vector4_t* tangent(int i)
+		Vector4_t* GetTangentData(int i) const
 		{
 			return reinterpret_cast<Vector4_t*>((char*)this + tangentDataStart) + i;
 		}
@@ -1338,11 +1339,10 @@ namespace vvc
 		uint8 r, g, b, a;
 	};
 
-
 	struct vertexColorFileHeader_t
 	{
-		int id; // MODEL_VERTEX_FILE_ID
-		int version; // MODEL_VERTEX_FILE_VERSION
+		int id; // IDCV
+		int version; // 1
 		int checksum; // same as studiohdr_t, ensures sync
 
 		int numLODs; // num of valid lods
@@ -1351,12 +1351,12 @@ namespace vvc
 		int colorDataStart;
 		int uv2DataStart;
 
-		VertexColor_t* color(int i)
+		VertexColor_t* GetColorData(int i) const
 		{
 			return reinterpret_cast<VertexColor_t*>((char*)this + colorDataStart) + i;
 		}
 
-		Vector2* uv2(int i)
+		Vector2* GetUVData(int i) const
 		{
 			return reinterpret_cast<Vector2*>((char*)this + uv2DataStart) + i;
 		}
@@ -1385,10 +1385,9 @@ namespace vvw
 
 		int weightDataStart; // index into mstudioboneweightextra_t array
 
-		// test these funcs
-		mstudioboneweightextra_t* GetWeightData(int i)
+		mstudioboneweightextra_t* GetWeightData(int i) const
 		{
-			return (mstudioboneweightextra_t*)(((char*)this + weightDataStart) + i);
+			return reinterpret_cast<mstudioboneweightextra_t*>((char*)this + weightDataStart) + i;
 		}
 	};
 }
@@ -1400,8 +1399,15 @@ namespace vvw
 
 // we have odd sized structs
 #pragma pack(push, 1)
+//namespace OptimizedModel
 namespace vtx
 {
+	struct BoneStateChangeHeader_t
+	{
+		int hardwareID;
+		int newBoneID;
+	};
+
 	struct Vertex_t
 	{
 		// these index into the mesh's vert[origMeshVertID]'s bones
@@ -1439,6 +1445,11 @@ namespace vtx
 		int numBoneStateChanges;
 		int boneStateChangeOffset;
 
+		BoneStateChangeHeader_t* pBoneStateChange(int i)
+		{
+			return reinterpret_cast<BoneStateChangeHeader_t*>((char*)this + boneStateChangeOffset) + i;
+		};
+
 		// MDL Version 49 and up only
 		int numTopologyIndices;
 		int topologyOffset;
@@ -1457,7 +1468,7 @@ namespace vtx
 		int numVerts;
 		int vertOffset;
 
-		Vertex_t* vtxVert(int i)
+		Vertex_t* pVertex(int i)
 		{
 			return reinterpret_cast<Vertex_t*>((char*)this + vertOffset) + i;
 		}
@@ -1465,7 +1476,7 @@ namespace vtx
 		int numIndices;
 		int indexOffset;
 
-		unsigned short* vtxIndice(int i)
+		unsigned short* pIndex(int i)
 		{
 			return reinterpret_cast<unsigned short*>((char*)this + indexOffset) + i;
 		}
@@ -1473,7 +1484,7 @@ namespace vtx
 		int numStrips;
 		int stripOffset;
 
-		StripHeader_t* vtxStrip(int i)
+		StripHeader_t* pStrip(int i)
 		{
 			return reinterpret_cast<StripHeader_t*>((char*)this + stripOffset) + i;
 		}
@@ -1484,7 +1495,20 @@ namespace vtx
 		// Points to an array of unsigned shorts (16 bits each)
 		int numTopologyIndices;
 		int topologyOffset;
+
+		unsigned short* pTopologyIndex(int i)
+		{
+			return reinterpret_cast<unsigned short*>((char*)this + topologyOffset) + i;
+		}
 	};
+
+	// likely unused in Respawn games as mouths and eyes are cut.
+	enum MeshFlags_t {
+		// these are both material properties, and a mesh has a single material.
+		MESH_IS_TEETH = 0x01,
+		MESH_IS_EYES = 0x02
+	};
+
 
 	struct MeshHeader_t
 	{
@@ -1493,7 +1517,7 @@ namespace vtx
 
 		unsigned char flags; // never read these as eyeballs and mouths are depreciated
 
-		StripGroupHeader_t* vtxStripGrp(int i)
+		StripGroupHeader_t* pStripGroup(int i)
 		{
 			return reinterpret_cast<StripGroupHeader_t*>((char*)this + stripGroupHeaderOffset) + i;
 		}
@@ -1507,7 +1531,7 @@ namespace vtx
 
 		float switchPoint;
 
-		MeshHeader_t* vtxMesh(int i)
+		MeshHeader_t* pMesh(int i)
 		{
 			return reinterpret_cast<MeshHeader_t*>((char*)this + meshOffset) + i;
 		}
@@ -1519,7 +1543,7 @@ namespace vtx
 		int numLODs;   //This is also specified in FileHeader_t
 		int lodOffset;
 
-		ModelLODHeader_t* vtxLOD(int i)
+		ModelLODHeader_t* pLOD(int i)
 		{
 			return reinterpret_cast<ModelLODHeader_t*>((char*)this + lodOffset) + i;
 		}
@@ -1531,9 +1555,30 @@ namespace vtx
 		int numModels;
 		int modelOffset;
 
-		ModelHeader_t* vtxModel(int i)
+		ModelHeader_t* pModel(int i)
 		{
 			return reinterpret_cast<ModelHeader_t*>((char*)this + modelOffset) + i;
+		}
+	};
+
+	struct MaterialReplacementHeader_t
+	{
+		short materialID;
+		int replacementMaterialNameOffset;
+		char* pMaterialReplacementName()
+		{
+			return ((char*)this + replacementMaterialNameOffset);
+		}
+	};
+
+	struct MaterialReplacementListHeader_t
+	{
+		int numReplacements;
+		int replacementOffset;
+
+		MaterialReplacementHeader_t* pMaterialReplacement(int i)
+		{
+			return reinterpret_cast<MaterialReplacementHeader_t*>((char*)this + replacementOffset) + i;
 		}
 	};
 
@@ -1556,11 +1601,16 @@ namespace vtx
 		// Offset to materialReplacementList Array. one of these for each LOD, 8 in total
 		int materialReplacementListOffset;
 
+		MaterialReplacementListHeader_t* pMaterialReplacementList(int lodID)
+		{
+			return reinterpret_cast<MaterialReplacementListHeader_t*>((char*)this + materialReplacementListOffset) + lodID;
+		}
+
 		// Defines the size and location of the body part array
 		int numBodyParts;
 		int bodyPartOffset;
 
-		BodyPartHeader_t* vtxBodypart(int i)
+		BodyPartHeader_t* pBodyPart(int i)
 		{
 			return reinterpret_cast<BodyPartHeader_t*>((char*)this + bodyPartOffset) + i;
 		}
@@ -1621,10 +1671,7 @@ namespace titanfall2
 	{
 		int sznameindex;
 
-		char* textureName()
-		{
-			return ((char*)this + sznameindex);
-		}
+		const char* pszName() const { return ((char*)this + sznameindex); }
 
 		int unused_flags;
 		int used;
@@ -1658,7 +1705,7 @@ namespace titanfall2
 
 		mstudio_meshvertexloddata_t vertexloddata;
 
-		int unk[2]; // set on load
+		char unk[8]; // set on load
 
 		int unused[6]; // remove as appropriate
 	};
@@ -1674,10 +1721,7 @@ namespace titanfall2
 		int nummeshes;
 		int meshindex;
 
-		titanfall2::mstudiomesh_t* mdlMesh(int i)
-		{
-			return reinterpret_cast<titanfall2::mstudiomesh_t*>((char*)this + meshindex) + i;
-		}
+		mstudiomesh_t* pMesh(int i) const { return reinterpret_cast<mstudiomesh_t*>((char*)this + meshindex) + i; }
 
 		// cache purposes
 		int numvertices; // number of unique vertices/normals/texcoords
@@ -1709,19 +1753,13 @@ namespace titanfall2
 		int base;
 		int modelindex;
 
-		titanfall2::mstudiomodel_t* mdlModel(int i)
-		{
-			return reinterpret_cast<titanfall2::mstudiomodel_t*>((char*)this + modelindex) + i;
-		}
+		mstudiomodel_t* pModel(int i) const { return reinterpret_cast<mstudiomodel_t*>((char*)this + modelindex) + i; }
 	};
 
 	struct mstudioanim_valueptr_t
 	{
 		short	offset[3];
-		inline mstudioanimvalue_t* pAnimvalue(int i)
-			const {
-			return (offset[i] > 0) ? reinterpret_cast<mstudioanimvalue_t*>((char*)this + offset[i]) : nullptr;
-		}
+		inline mstudioanimvalue_t* pAnimvalue(int i) const { return (offset[i] > 0) ? reinterpret_cast<mstudioanimvalue_t*>((char*)this + offset[i]) : nullptr; }
 	};
 
 	// v53 flags
@@ -1882,11 +1920,6 @@ namespace titanfall2
 		}
 
 		int	posscaleindex; // unused
-		/*const Vector3* pPosScale(int i)
-			const {
-			assert(i >= 0 && i < numbones);
-			return reinterpret_cast<Vector3*>((char*)this + posscaleindex) + i;
-		}*/
 
 		int	rotscaleindex;
 		const Vector3* pRotScale(int i)
@@ -1947,10 +1980,7 @@ namespace titanfall2
 	{
 		int sznameindex;
 
-		char* pszName()
-		{
-			return ((char*)this + sznameindex);
-		}
+		const char* pszName() const { return ((char*)this + sznameindex); }
 
 		int parent; // parent bone
 		int bonecontroller[6]; // bone controller index, -1 == none
@@ -1993,7 +2023,7 @@ namespace titanfall2
 		int version; // Format version number, such as 48 (0x30,0x00,0x00,0x00)
 		int checksum; // This has to be the same in the phy and vtx files to load!
 		int sznameindex; // This has been moved from studiohdr2 to the front of the main header.
-		inline char* pszName() const { return ((char*)this + sznameindex); }
+		const inline char* pszName() const { return ((char*)this + sznameindex); }
 		char name[64]; // The internal name of the model, padding with null bytes.
 						// Typically "my_model.mdl" will have an internal name of "my_model"
 		int length; // Data size of MDL file in bytes.
@@ -2014,11 +2044,7 @@ namespace titanfall2
 		// max is definitely 256 because 8bit uint limit
 		int numbones; // bones
 		int boneindex;
-		mstudiobone_t* pBone(int i)
-			const {
-			assert(i >= 0 && i < numbones);
-			return reinterpret_cast<mstudiobone_t*>((char*)this + boneindex) + i;
-		}
+		mstudiobone_t* pBone(int i) const { assert(i >= 0 && i < numbones); return reinterpret_cast<mstudiobone_t*>((char*)this + boneindex) + i; }
 
 		int numbonecontrollers; // bone controllers
 		int bonecontrollerindex;
@@ -2028,11 +2054,7 @@ namespace titanfall2
 
 		int numlocalanim; // animations/poses
 		int localanimindex; // animation descriptions
-
-		titanfall2::mstudioanimdesc_t* pAnimdesc(int i)
-		{
-			return reinterpret_cast<titanfall2::mstudioanimdesc_t*>((char*)this + localanimindex) + i;
-		}
+		mstudioanimdesc_t* pLocalAnimdesc(int i) const { return reinterpret_cast<titanfall2::mstudioanimdesc_t*>((char*)this + localanimindex) + i; }
 
 		int numlocalseq; // sequences
 		int	localseqindex;
@@ -2045,11 +2067,7 @@ namespace titanfall2
 		// raw textures
 		int numtextures; // the material limit exceeds 128, probably 256.
 		int textureindex;
-
-		titanfall2::mstudiotexture_t* texture(int i)
-		{
-			return reinterpret_cast<titanfall2::mstudiotexture_t*>((char*)this + textureindex) + i;
-		}
+		mstudiotexture_t* pTexture(int i) const { return reinterpret_cast<mstudiotexture_t*>((char*)this + textureindex) + i; }
 
 		// this should always only be one, unless using vmts.
 		// raw textures search paths
@@ -2063,11 +2081,7 @@ namespace titanfall2
 
 		int numbodyparts;
 		int bodypartindex;
-
-		mstudiobodyparts_t* mdlBodypart(int i)
-		{
-			return reinterpret_cast<mstudiobodyparts_t*>((char*)this + bodypartindex) + i;
-		}
+		mstudiobodyparts_t* pBodypart(int i) const { return reinterpret_cast<mstudiobodyparts_t*>((char*)this + bodypartindex) + i; }
 
 		int numlocalattachments;
 		int localattachmentindex;
@@ -2196,8 +2210,542 @@ namespace titanfall2
 		int unkindex3;
 
 		int unused1[60];
-
 	};
+}
+
+namespace apexlegends
+{
+	namespace v8
+	{
+		struct mstudiotexture_t
+		{
+			int sznameindex;
+			const char* pszName() const { return ((char*)this + sznameindex); }
+
+			unsigned __int64 guid; // guid of the material it references
+		};
+
+		struct mstudiomesh_t
+		{
+			int material;
+
+			int modelindex;
+
+			int numvertices; // number of unique vertices/normals/texcoords
+			int vertexoffset; // vertex mstudiovertex_t
+							  // offset by vertexoffset number of verts into vvd vertexes, relative to the models offset
+
+			// Access thin/fat mesh vertex data (only one will return a non-NULL result)
+
+			int deprecated_numflexes; // vertex animation
+			int deprecated_flexindex;
+
+			// special codes for material operations
+			int deprecated_materialtype;
+			int deprecated_materialparam;
+
+			// a unique ordinal for this mesh
+			int meshid;
+
+			Vector3 center;
+
+			mstudio_meshvertexloddata_t vertexloddata;
+
+			char unk[8]; // set on load
+		};
+
+		struct mstudiomodel_t
+		{
+			char name[64];
+
+			int unkstringindex; // goes to bones sometimes, string index
+
+			int type;
+
+			float boundingradius;
+
+			int nummeshes;
+			int meshindex;
+
+			mstudiomesh_t* pMesh(int i) const { return reinterpret_cast<mstudiomesh_t*>((char*)this + meshindex) + i; }
+
+			// cache purposes
+			int numvertices; // number of unique vertices/normals/texcoords
+			int vertexindex; // vertex Vector
+							 // offset by vertexindex number of bytes into vvd verts
+			int tangentsindex; // tangents Vector
+							   // offset by tangentsindex number of bytes into vvd tangents
+
+			int numattachments;
+			int attachmentindex;
+
+			int deprecated_numeyeballs;
+			int deprecated_eyeballindex;
+
+			int pad[4];
+
+			int colorindex; // vertex color
+							// offset by colorindex number of bytes into vvc vertex colors
+			int uv2index; // vertex second uv map
+						  // offset by uv2index number of bytes into vvc secondary uv map
+		};
+
+		struct mstudiobodyparts_t
+		{
+			int sznameindex;
+			int nummodels;
+			int base;
+			int modelindex;
+
+			mstudiomodel_t* pModel(int i) const { return reinterpret_cast<mstudiomodel_t*>((char*)this + modelindex) + i; }
+		};
+
+		//struct mstudioanim_valueptr_t
+		//{
+		//	short	offset[3];
+		//	inline mstudioanimvalue_t* pAnimvalue(int i) const { return (offset[i] > 0) ? reinterpret_cast<mstudioanimvalue_t*>((char*)this + offset[i]) : nullptr; }
+		//};
+
+		//// v53 flags
+		//// These work as toggles, flag enabled = raw data, flag disabled = pointers
+		//#define STUDIO_ANIM_DELTA		0x01 // delta animation
+		//#define STUDIO_ANIM_RAWPOS		0x02 // Vector48
+		//#define STUDIO_ANIM_RAWROT		0x04 // Quaternion64
+		//#define STUDIO_ANIM_RAWSCALE	0x08 // Vector48, drone_frag.mdl for scale track usage
+		//#define STUDIO_ANIM_NOROT		0x10
+
+		//struct mstudio_rle_anim_t
+		//{
+		//	float				posscale; // does what posscale is used for
+
+		//	unsigned char		bone;
+		//	byte				flags;		// weighing options
+
+		//	// broken
+		//	inline char* pData() const { return ((char*)this + sizeof(mstudio_rle_anim_t)); } // gets start of animation data, this should have a '+2' if aligned to 4
+		//	mstudioanim_valueptr_t* pRotV() const { return reinterpret_cast<mstudioanim_valueptr_t*>(pData()); } // returns rot as mstudioanim_valueptr_t
+		//	mstudioanim_valueptr_t* pPosV() const { return reinterpret_cast<mstudioanim_valueptr_t*>(pData() + 8); } // returns pos as mstudioanim_valueptr_t
+		//	mstudioanim_valueptr_t* pScaleV() const { return reinterpret_cast<mstudioanim_valueptr_t*>(pData() + 14); } // returns scale as mstudioanim_valueptr_t
+
+		//	Quaternion64* pQuat64() const { return reinterpret_cast<Quaternion64*>(pData()); } // returns rot as static Quaternion64
+		//	Vector48* pPos() const { return reinterpret_cast<Vector48*>(pData() + 8); } // returns pos as static Vector48
+		//	Vector48* pScale() const { return reinterpret_cast<Vector48*>(pData() + 14); } // returns scale as static Vector48
+
+		//	// points to next bone in the list
+		//	int* pNextOffset() const { return reinterpret_cast<int*>(pData() + 20); }
+		//};
+
+		//struct mstudioanimsections_t
+		//{
+		//	int animindex;
+		//};
+
+		//#define STUDIO_X		0x00000001
+		//#define STUDIO_Y		0x00000002	
+		//#define STUDIO_Z		0x00000004
+		//#define STUDIO_XR		0x00000008
+		//#define STUDIO_YR		0x00000010
+		//#define STUDIO_ZR		0x00000020
+
+		//#define STUDIO_LX		0x00000040
+		//#define STUDIO_LY		0x00000080
+		//#define STUDIO_LZ		0x00000100
+		//#define STUDIO_LXR		0x00000200
+		//#define STUDIO_LYR		0x00000400
+		//#define STUDIO_LZR		0x00000800
+
+		//#define STUDIO_LINEAR	0x00001000
+
+		//#define STUDIO_TYPES	0x0003FFFF
+		//#define STUDIO_RLOOP	0x00040000	// controller that wraps shortest distance
+
+		//struct mstudiomovement_t
+		//{
+		//	int					endframe;
+		//	int					motionflags;
+		//	float				v0;			// velocity at start of block
+		//	float				v1;			// velocity at end of block
+		//	float				angle;		// YAW rotation at end of this blocks movement
+		//	Vector3				vector;		// movement vector relative to this blocks initial angle
+		//	Vector3				position;	// relative to start of animation???
+		//};
+
+		//// new in Titanfall 1
+		//// translation track for origin bone, used in lots of animated scenes, requires STUDIO_FRAMEMOVEMENT
+		//// pos_x, pos_y, pos_z, yaw
+		//struct mstudioframemovement_t
+		//{
+		//	float scale[4];
+		//	short offset[4];
+		//	inline mstudioanimvalue_t* pAnimvalue(int i) const { return (offset[i] > 0) ? reinterpret_cast<mstudioanimvalue_t*>((char*)this + offset[i]) : nullptr; }
+		//};
+
+		//struct mstudioanimdesc_t
+		//{
+		//	int baseptr;
+
+		//	int sznameindex;
+		//	inline const char* pszName() const { return ((char*)this + sznameindex); }
+
+		//	float fps; // frames per second	
+		//	int flags; // looping/non-looping flags
+
+		//	int numframes;
+
+		//	// piecewise movement
+		//	int nummovements;
+		//	int movementindex;
+		//	inline mstudiomovement_t* const pMovement(int i) const { return reinterpret_cast<mstudiomovement_t*>((char*)this + movementindex) + i; };
+
+		//	int framemovementindex; // new in v52
+		//	inline const mstudioframemovement_t* pFrameMovement() const { return reinterpret_cast<mstudioframemovement_t*>((char*)this + framemovementindex); }
+
+		//	int animindex; // non-zero when anim data isn't in sections
+		//	//mstudio_rle_anim_t* pAnim(int* piFrame, float& flStall) const; // returns pointer to data and new frame index
+		//	mstudio_rle_anim_t* pAnim(int* piFrame) const; // returns pointer to data and new frame index
+
+		//	int numikrules;
+		//	int ikruleindex; // non-zero when IK data is stored in the mdl
+
+		//	int numlocalhierarchy;
+		//	int localhierarchyindex;
+
+		//	int sectionindex;
+		//	int sectionframes; // number of frames used in each fast lookup section, zero if not used
+		//	inline const mstudioanimsections_t* pSection(int i) const { return reinterpret_cast<mstudioanimsections_t*>((char*)this + sectionindex) + i; }
+
+		//	int unused[8];
+		//};
+
+		struct mstudiolinearbone_t
+		{
+			int numbones;
+
+			int flagsindex;
+			int* pFlags(int i)
+				const {
+				assert(i >= 0 && i < numbones);
+				return reinterpret_cast<int*>((char*)this + flagsindex) + i;
+			}
+
+			int	parentindex;
+			int* pParent(int i)
+				const {
+				assert(i >= 0 && i < numbones);
+				return reinterpret_cast<int*>((char*)this + parentindex) + i;
+			}
+
+			int	posindex;
+			const Vector3* pPos(int i)
+				const {
+				assert(i >= 0 && i < numbones);
+				return reinterpret_cast<Vector3*>((char*)this + posindex) + i;
+			}
+
+			int quatindex;
+			const Quaternion* pQuat(int i)
+				const {
+				assert(i >= 0 && i < numbones);
+				return reinterpret_cast<Quaternion*>((char*)this + quatindex) + i;
+			}
+
+			int rotindex;
+			const RadianEuler* pRot(int i)
+				const {
+				assert(i >= 0 && i < numbones);
+				return reinterpret_cast<RadianEuler*>((char*)this + rotindex) + i;
+			}
+
+			int posetoboneindex;
+			const matrix3x4_t* pPoseToBone(int i)
+				const {
+				assert(i >= 0 && i < numbones);
+				return reinterpret_cast<matrix3x4_t*>((char*)this + posetoboneindex) + i;
+			}
+		};
+
+		#define BONE_CALCULATE_MASK			0x1F
+		#define BONE_PHYSICALLY_SIMULATED	0x01	// bone is physically simulated when physics are active
+		#define BONE_PHYSICS_PROCEDURAL		0x02	// procedural when physics is active
+		#define BONE_ALWAYS_PROCEDURAL		0x04	// bone is always procedurally animated
+		#define BONE_SCREEN_ALIGN_SPHERE	0x08	// bone aligns to the screen, not constrained in motion.
+		#define BONE_SCREEN_ALIGN_CYLINDER	0x10	// bone aligns to the screen, constrained by it's own axis.
+
+		#define BONE_USED_BY_IKCHAIN		0x20 // bone is influenced by IK chains, added in V52 (Titanfall 1)
+
+		#define BONE_USED_MASK				0x0007FF00
+		#define BONE_USED_BY_ANYTHING		0x0007FF00
+		#define BONE_USED_BY_HITBOX			0x00000100	// bone (or child) is used by a hit box
+		#define BONE_USED_BY_ATTACHMENT		0x00000200	// bone (or child) is used by an attachment point
+		#define BONE_USED_BY_VERTEX_MASK	0x0003FC00
+		#define BONE_USED_BY_VERTEX_LOD0	0x00000400	// bone (or child) is used by the toplevel model via skinned vertex
+		#define BONE_USED_BY_VERTEX_LOD1	0x00000800	
+		#define BONE_USED_BY_VERTEX_LOD2	0x00001000  
+		#define BONE_USED_BY_VERTEX_LOD3	0x00002000
+		#define BONE_USED_BY_VERTEX_LOD4	0x00004000
+		#define BONE_USED_BY_VERTEX_LOD5	0x00008000
+		#define BONE_USED_BY_VERTEX_LOD6	0x00010000
+		#define BONE_USED_BY_VERTEX_LOD7	0x00020000
+		#define BONE_USED_BY_BONE_MERGE		0x00040000	// bone is available for bone merge to occur against it
+
+		#define BONE_FLAG_UNK				0x00080000 // where?
+
+		#define BONE_USED_BY_VERTEX_AT_LOD(lod) ( BONE_USED_BY_VERTEX_LOD0 << (lod) )
+		#define BONE_USED_BY_ANYTHING_AT_LOD(lod) ( ( BONE_USED_BY_ANYTHING & ~BONE_USED_BY_VERTEX_MASK ) | BONE_USED_BY_VERTEX_AT_LOD(lod) )
+
+		#define BONE_TYPE_MASK				0x00F00000
+		#define BONE_FIXED_ALIGNMENT		0x00100000	// bone can't spin 360 degrees, all interpolation is normalized around a fixed orientation
+
+		#define BONE_HAS_SAVEFRAME_POS		0x00200000	// Vector48
+		#define BONE_HAS_SAVEFRAME_ROT64	0x00400000	// Quaternion64
+		#define BONE_HAS_SAVEFRAME_ROT32	0x00800000	// Quaternion32
+
+		#define BONE_FLAG_UNK1				0x01000000 // where?
+
+		struct mstudiobone_t
+		{
+			int sznameindex;
+
+			const char* pszName() const { return ((char*)this + sznameindex); }
+
+			int parent; // parent bone
+			int bonecontroller[6]; // bone controller index, -1 == none
+
+			// default values
+			Vector3 pos; // base bone position
+			Quaternion quat;
+			RadianEuler rot; // base bone rotation
+			Vector3 scale; // bone scale(?)
+
+			matrix3x4_t poseToBone;
+			Quaternion qAlignment;
+
+			int flags;
+			int proctype;
+			int procindex; // procedural rule offset
+			int physicsbone; // index into physically simulated bone
+
+			int surfacepropidx; // index into string tablefor property name
+
+			int contents; // See BSPFlags.h for the contents flags
+
+			int surfacepropLookup; // this index must be cached by the loader, not saved in the file
+
+			int unk;
+
+			int unkid; // physics index (?)
+		};
+
+		struct studiohdr_t
+		{
+			int id; // Model format ID, such as "IDST" (0x49 0x44 0x53 0x54)
+			int version; // Format version number, such as 48 (0x30,0x00,0x00,0x00)
+			int checksum; // This has to be the same in the phy and vtx files to load!
+			int sznameindex; // This has been moved from studiohdr2 to the front of the main header.
+			const inline char* pszName() const { return ((char*)this + sznameindex); }
+			char name[64]; // The internal name of the model, padding with null bytes.
+							// Typically "my_model.mdl" will have an internal name of "my_model"
+			int length; // Data size of MDL file in bytes.
+
+			Vector3 eyeposition;	// ideal eye position
+
+			Vector3 illumposition;	// illumination center
+
+			Vector3 hull_min;		// ideal movement hull size
+			Vector3 hull_max;
+
+			Vector3 view_bbmin;		// clipping bounding box
+			Vector3 view_bbmax;
+
+			int flags;
+
+			int numbones; // bones
+			int boneindex;
+			mstudiobone_t* pBone(int i) const { assert(i >= 0 && i < numbones); return reinterpret_cast<mstudiobone_t*>((char*)this + boneindex) + i; }
+
+			int numbonecontrollers; // bone controllers
+			int bonecontrollerindex;
+
+			int numhitboxsets;
+			int hitboxsetindex;
+
+			// seemingly unused now, as animations are per sequence
+			int numlocalanim; // animations/poses
+			int localanimindex; // animation descriptions
+
+			int numlocalseq; // sequences
+			int	localseqindex;
+
+			int activitylistversion; // initialization flag - have the sequences been indexed?
+
+			// mstudiotexture_t
+			// short rpak path
+			// raw textures
+			int materialtypesindex; // index into an array of byte sized material type enums for each material used by the model
+			int numtextures; // the material limit exceeds 128, probably 256.
+			int textureindex;
+			mstudiotexture_t* pTexture(int i) const { return reinterpret_cast<mstudiotexture_t*>((char*)this + textureindex) + i; }
+
+			// this should always only be one, unless using vmts.
+			// raw textures search paths
+			int numcdtextures;
+			int cdtextureindex;
+
+			// replaceable textures tables
+			int numskinref;
+			int numskinfamilies;
+			int skinindex;
+
+			int numbodyparts;
+			int bodypartindex;
+			mstudiobodyparts_t* pBodypart(int i) const { return reinterpret_cast<mstudiobodyparts_t*>((char*)this + bodypartindex) + i; }
+
+			int numlocalattachments;
+			int localattachmentindex;
+
+			int numlocalnodes;
+			int localnodeindex;
+			int localnodenameindex;
+
+			int numunknodes; // ???
+			int nodedataindexindex; // index into an array of int sized offsets that read into the data for each node
+
+			int meshindex; // hard offset to the start of this models meshes
+
+			// all flex related model vars and structs are stripped in respawn source
+			int deprecated_numflexcontrollers;
+			int deprecated_flexcontrollerindex;
+
+			int deprecated_numflexrules;
+			int deprecated_flexruleindex;
+
+			int numikchains;
+			int ikchainindex;
+
+			// mesh panels for using rui on models, primarily for weapons
+			int numruimeshes;
+			int ruimeshindex;
+
+			int numlocalposeparameters;
+			int localposeparamindex;
+
+			int surfacepropindex;
+
+			int keyvalueindex;
+			int keyvaluesize;
+
+			int numlocalikautoplaylocks;
+			int localikautoplaylockindex;
+
+			float mass;
+			int contents;
+
+			// unused for packed models
+			// technically still functional though I am unsure why you'd want to use it
+			int numincludemodels;
+			int includemodelindex;
+
+			int /* mutable void* */ virtualModel;
+
+			int bonetablebynameindex;
+
+			// if STUDIOHDR_FLAGS_CONSTANT_DIRECTIONAL_LIGHT_DOT is set,
+			// this value is used to calculate directional components of lighting 
+			// on static props
+			byte constdirectionallightdot;
+
+			// set during load of mdl data to track *desired* lod configuration (not actual)
+			// the *actual* clamped root lod is found in studiohwdata
+			// this is stored here as a global store to ensure the staged loading matches the rendering
+			byte rootLOD;
+
+			// set in the mdl data to specify that lod configuration should only allow first numAllowRootLODs
+			// to be set as root LOD:
+			//	numAllowedRootLODs = 0	means no restriction, any lod can be set as root lod.
+			//	numAllowedRootLODs = N	means that lod0 - lod(N-1) can be set as root lod, but not lodN or lower.
+			byte numAllowedRootLODs;
+
+			byte unused;
+
+			float fadedistance;	// set to -1 to never fade. set above 0 if you want it to fade out, distance is in feet.
+								// player/titan models seem to inherit this value from the first model loaded in menus.
+								// works oddly on entities, probably only meant for static props
+
+			float gathersize; // what. from r5r struct. no clue what this does, seemingly for early versions of apex bsp but stripped in release apex (season 0)
+
+			int deprecated_numflexcontrollerui;
+			int deprecated_flexcontrolleruiindex;
+
+			float flVertAnimFixedPointScale; // to be verified
+			int surfacepropLookup; // saved in the file
+
+			// this is in most shipped models, probably part of their asset bakery.
+			// doesn't actually need to be written pretty sure, only four bytes when not present.
+			// this is not completely true as some models simply have nothing, such as animation models.
+			int sourceFilenameOffset;
+
+			int numsrcbonetransform;
+			int srcbonetransformindex;
+
+			int	illumpositionattachmentindex;
+
+			int linearboneindex;
+			mstudiolinearbone_t* pLinearBones() const { return linearboneindex ? reinterpret_cast<mstudiolinearbone_t*>((char*)this + linearboneindex) : nullptr; }
+
+			// unsure what this is for but it exists for jigglbones
+			int numprocbones;
+			int procbonetableindex;
+			int linearprocboneindex;
+
+			// depreciated as they are removed in 12.1
+			int m_nBoneFlexDriverCount;
+			int m_nBoneFlexDriverIndex;
+
+			int m_nPerTriAABBIndex;
+			int m_nPerTriAABBNodeCount;
+			int m_nPerTriAABBLeafCount;
+			int m_nPerTriAABBVertCount;
+
+			// always "" or "Titan"
+			int unkstringindex;
+
+			// this is now used for combined files in rpak, vtx, vvd, and vvc are all combined while vphy is separate.
+			// the indexes are added to the offset in the rpak mdl_ header.
+			// vphy isn't vphy, looks like a heavily modified vphy.
+			int vtxindex; // VTX
+			int vvdindex; // VVD / IDSV
+			int vvcindex; // VVC / IDCV 
+			int vphyindex; // VPHY / IVPS
+
+			int vtxsize;
+			int vvdsize;
+			int vvcsize;
+			int vphysize; // still used in models using vg
+
+			// unused in apex, gets cut in 12.1
+			int unkmemberindex1;
+			int numunkmember1;
+
+			// only seen on '_animated' suffixed models so far
+			int unkcount3;
+			int unkindex3;
+
+			// BVH4 size (?)
+			Vector3 mins;
+			Vector3 maxs; // seem to be the same as hull size
+
+			int unk3_v54[3];
+
+			int bvh4index; // bvh4 tree
+
+			short unk4_v54[2]; // same as unk3_v54_v121, 2nd might be base for other offsets? these are related to bvh4 stuff
+
+			// new in apex vertex weight file for verts that have more than three weights
+			// vvw is a 'fake' extension name, we do not know the proper name.
+			int vvwindex; // index will come last after other vertex files
+			int vvwsize;
+		};
+	}
 }
 
 

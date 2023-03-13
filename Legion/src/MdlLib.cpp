@@ -70,8 +70,7 @@ void MdlLib::InitializeAnimExporter(AnimExportFormat_t Format)
 }
 
 // extract vertex data from normal source style models: vtx, vvd, vvc, vvw.
-void MdlLib::ExtractValveVertexData(titanfall2::studiohdr_t* pHdr, vtx::FileHeader_t* pVtx, vvd::vertexFileHeader_t* pVVD, vvc::vertexColorFileHeader_t* pVVC, vvw::vertexBoneWeightsExtraFileHeader_t* pVVW, 
-									std::unique_ptr<Assets::Model> &ExportModel, const string& Path)
+void MdlLib::ExtractValveVertexData(titanfall2::studiohdr_t* pHdr, vtx::FileHeader_t* pVtx, vvd::vertexFileHeader_t* pVVD, vvc::vertexColorFileHeader_t* pVVC, vvw::vertexBoneWeightsExtraFileHeader_t* pVVW, std::unique_ptr<Assets::Model> &ExportModel, const string& Path)
 {
 	for (int i = 0; i < pVtx->numLODs; i++)
 	{
@@ -86,13 +85,13 @@ void MdlLib::ExtractValveVertexData(titanfall2::studiohdr_t* pHdr, vtx::FileHead
 		{
 			for (int j = 0; j < pVVD->numFixups; j++)
 			{
-				vvd::vertexFileFixup_t* vertexFixup = pVVD->fixup(j);
+				vvd::vertexFileFixup_t* vertexFixup = pVVD->GetFixupData(j);
 
 				if (vertexFixup->lod >= i)
 				{
 					for (int k = 0; k < vertexFixup->numVertexes; k++)
 					{
-						vvd::mstudiovertex_t* vvdVert = pVVD->vertex(vertexFixup->sourceVertexID + k);
+						vvd::mstudiovertex_t* vvdVert = pVVD->GetVertexData(vertexFixup->sourceVertexID + k);
 
 						vvdVerts.push_back(vvdVert);
 
@@ -100,8 +99,8 @@ void MdlLib::ExtractValveVertexData(titanfall2::studiohdr_t* pHdr, vtx::FileHead
 						if (pVVC)
 						{
 							// doesn't matter which we pack as long as it has vvc, we will only used what's needed later
-							vvc::VertexColor_t* vvcColor = pVVC->color(vertexFixup->sourceVertexID + k);
-							Vector2* vvcUV2 = pVVC->uv2(vertexFixup->sourceVertexID + k);
+							vvc::VertexColor_t* vvcColor = pVVC->GetColorData(vertexFixup->sourceVertexID + k);
+							Vector2* vvcUV2 = pVVC->GetUVData(vertexFixup->sourceVertexID + k);
 
 							vvcColors.push_back(vvcColor);
 							vvcUV2s.push_back(vvcUV2);
@@ -115,7 +114,7 @@ void MdlLib::ExtractValveVertexData(titanfall2::studiohdr_t* pHdr, vtx::FileHead
 			// using per lod vertex count may have issues (tbd)
 			for (int j = 0; j < pVVD->numLODVertexes[i]; j++)
 			{
-				vvd::mstudiovertex_t* vvdVert = pVVD->vertex(j);
+				vvd::mstudiovertex_t* vvdVert = pVVD->GetVertexData(j);
 
 				vvdVerts.push_back(vvdVert);
 
@@ -123,8 +122,8 @@ void MdlLib::ExtractValveVertexData(titanfall2::studiohdr_t* pHdr, vtx::FileHead
 				if (pVVC)
 				{
 					// doesn't matter which we pack as long as it has vvc, we will only used what's needed later
-					vvc::VertexColor_t* vvcColor = pVVC->color(j);
-					Vector2* vvcUV2 = pVVC->uv2(j);
+					vvc::VertexColor_t* vvcColor = pVVC->GetColorData(j);
+					Vector2* vvcUV2 = pVVC->GetUVData(j);
 
 					vvcColors.push_back(vvcColor);
 					vvcUV2s.push_back(vvcUV2);
@@ -139,21 +138,21 @@ void MdlLib::ExtractValveVertexData(titanfall2::studiohdr_t* pHdr, vtx::FileHead
 		// eventually we should do checks on all of these to confirm they match
 		for (int j = 0; j < pHdr->numbodyparts; j++)
 		{
-			titanfall2::mstudiobodyparts_t* mdlBodypart = pHdr->mdlBodypart(j);
-			vtx::BodyPartHeader_t* vtxBodypart = pVtx->vtxBodypart(j);
+			titanfall2::mstudiobodyparts_t* mdlBodypart = pHdr->pBodypart(j);
+			vtx::BodyPartHeader_t* vtxBodypart = pVtx->pBodyPart(j);
 
 			for (int k = 0; k < mdlBodypart->nummodels; k++)
 			{
-				titanfall2::mstudiomodel_t* mdlModel = mdlBodypart->mdlModel(k);
-				vtx::ModelHeader_t* vtxModel = vtxBodypart->vtxModel(k);
+				titanfall2::mstudiomodel_t* mdlModel = mdlBodypart->pModel(k);
+				vtx::ModelHeader_t* vtxModel = vtxBodypart->pModel(k);
 
 				// lod
-				vtx::ModelLODHeader_t* vtxLod = vtxModel->vtxLOD(i);
+				vtx::ModelLODHeader_t* vtxLod = vtxModel->pLOD(i);
 
 				for (int l = 0; l < mdlModel->nummeshes; l++)
 				{
-					titanfall2::mstudiomesh_t* mdlMesh = mdlModel->mdlMesh(l);
-					vtx::MeshHeader_t* vtxMesh = vtxLod->vtxMesh(l);
+					titanfall2::mstudiomesh_t* mdlMesh = mdlModel->pMesh(l);
+					vtx::MeshHeader_t* vtxMesh = vtxLod->pMesh(l);
 
 					// so we don't make empty meshes
 					if (mdlMesh->vertexloddata.numLODVertexes[i] > 0)
@@ -163,16 +162,16 @@ void MdlLib::ExtractValveVertexData(titanfall2::studiohdr_t* pHdr, vtx::FileHead
 						Assets::Mesh& exportMesh = ExportModel->Meshes.Emplace(((pHdr->flags & STUDIOHDR_FLAGS_USES_EXTRA_BONE_WEIGHTS) && (pHdr->version == 54)) ? MAX_NUM_EXTRA_BONE_WEIGHTS : MAX_NUM_BONES_PER_VERT, (pHdr->flags & STUDIOHDR_FLAGS_USES_UV2) ? 2 : 1); // set uv count, two uvs used rarely in v53
 
 						// set "texture" aka material
-						titanfall2::mstudiotexture_t* meshMaterial = pHdr->texture(mdlMesh->material);
-						exportMesh.MaterialIndices.EmplaceBack(ExportModel->AddMaterial(IO::Path::GetFileNameWithoutExtension(meshMaterial->textureName()), ""));
+						titanfall2::mstudiotexture_t* meshMaterial = pHdr->pTexture(mdlMesh->material);
+						exportMesh.MaterialIndices.EmplaceBack(ExportModel->AddMaterial(IO::Path::GetFileNameWithoutExtension(meshMaterial->pszName()), ""));
 
 						for (int m = 0; m < vtxMesh->numStripGroups; m++)
 						{
-							vtx::StripGroupHeader_t* vtxStripGroup = vtxMesh->vtxStripGrp(m);
+							vtx::StripGroupHeader_t* vtxStripGroup = vtxMesh->pStripGroup(m);
 
 							for (int n = 0; n < vtxStripGroup->numVerts; n++)
 							{
-								vtx::Vertex_t* vtxVert = vtxStripGroup->vtxVert(n);
+								vtx::Vertex_t* vtxVert = vtxStripGroup->pVertex(n);
 								vvd::mstudiovertex_t* vvdVert = vvdVerts.at(vertexOffset + vtxVert->origMeshVertID);
 
 								Assets::VertexColor vertexColor;
@@ -219,9 +218,9 @@ void MdlLib::ExtractValveVertexData(titanfall2::studiohdr_t* pHdr, vtx::FileHead
 
 							for (int n = 0; n < vtxStripGroup->numIndices; n += 3)
 							{
-								unsigned short i1 = *vtxStripGroup->vtxIndice(n);
-								unsigned short i2 = *vtxStripGroup->vtxIndice(n + 1);
-								unsigned short i3 = *vtxStripGroup->vtxIndice(n + 2);
+								unsigned short i1 = *vtxStripGroup->pIndex(n);
+								unsigned short i2 = *vtxStripGroup->pIndex(n + 1);
+								unsigned short i3 = *vtxStripGroup->pIndex(n + 2);
 
 								exportMesh.Faces.EmplaceBack(i1, i2, i3);
 							}
@@ -479,10 +478,7 @@ void MdlLib::ExtractAnimValue(int frame, mstudioanimvalue_t* panimvalue, float s
 }
 
 // parse rle animation
-void MdlLib::CalcBoneQuaternion(int frame, float s,
-								const Quaternion& baseQuat, const RadianEuler& baseRot, const Vector3& baseRotScale,
-								int iBaseFlags, const Quaternion& baseAlignment,
-								const titanfall2::mstudio_rle_anim_t* panim, Quaternion& q)
+void MdlLib::CalcBoneQuaternion(int frame, float s, const Quaternion& baseQuat, const RadianEuler& baseRot, const Vector3& baseRotScale, int iBaseFlags, const Quaternion& baseAlignment, const titanfall2::mstudio_rle_anim_t* panim, Quaternion& q)
 {
 	if (panim->flags & STUDIO_ANIM_RAWROT)
 	{
@@ -567,10 +563,7 @@ void MdlLib::CalcBoneQuaternion(int frame, float s,
 }
 
 // parse rle animation
-inline void MdlLib::CalcBoneQuaternion(int frame, float s,
-	const titanfall2::mstudiobone_t* pBone,
-	const titanfall2::mstudiolinearbone_t* pLinearBones,
-	const titanfall2::mstudio_rle_anim_t* panim, Quaternion& q)
+inline void MdlLib::CalcBoneQuaternion(int frame, float s, const titanfall2::mstudiobone_t* pBone, const titanfall2::mstudiolinearbone_t* pLinearBones, const titanfall2::mstudio_rle_anim_t* panim, Quaternion& q)
 {
 	if (pLinearBones)
 	{
@@ -583,9 +576,7 @@ inline void MdlLib::CalcBoneQuaternion(int frame, float s,
 }
 
 // parse rle animation
-void MdlLib::CalcBonePosition(int frame, float s,
-					const Vector3& basePos, const float& baseBoneScale,
-					const titanfall2::mstudio_rle_anim_t* panim, Vector3& pos)
+void MdlLib::CalcBonePosition(int frame, float s, const Vector3& basePos, const float& baseBoneScale, const titanfall2::mstudio_rle_anim_t* panim, Vector3& pos)
 {
 	if (panim->flags & STUDIO_ANIM_RAWPOS)
 	{
@@ -626,10 +617,7 @@ void MdlLib::CalcBonePosition(int frame, float s,
 }
 
 // parse rle animation
-inline void MdlLib::CalcBonePosition(int frame, float s,
-	const titanfall2::mstudiobone_t* pBone,
-	const titanfall2::mstudiolinearbone_t* pLinearBones,
-	const titanfall2::mstudio_rle_anim_t* panim, Vector3& pos)
+inline void MdlLib::CalcBonePosition(int frame, float s, const titanfall2::mstudiobone_t* pBone, const titanfall2::mstudiolinearbone_t* pLinearBones, const titanfall2::mstudio_rle_anim_t* panim, Vector3& pos)
 {
 	if (pLinearBones)
 	{
@@ -641,9 +629,7 @@ inline void MdlLib::CalcBonePosition(int frame, float s,
 	}
 }
 
-void MdlLib::CalcBoneScale(int frame, float s,
-	const Vector3& baseScale, Vector3& baseScaleScale,
-	const titanfall2::mstudio_rle_anim_t* panim, Vector3& scale)
+void MdlLib::CalcBoneScale(int frame, float s, const Vector3& baseScale, Vector3& baseScaleScale, const titanfall2::mstudio_rle_anim_t* panim, Vector3& scale)
 {
 	if (panim->flags & STUDIO_ANIM_RAWSCALE)
 	{
@@ -899,7 +885,7 @@ void MdlLib::ExportMDLv53(const string& Asset, const string& Path)
 
 		for (int i = 0; i < pHdr->numlocalanim; i++)
 		{
-			titanfall2::mstudioanimdesc_t* animdesc = pHdr->pAnimdesc(i);
+			titanfall2::mstudioanimdesc_t* animdesc = pHdr->pLocalAnimdesc(i);
 
 			std::unique_ptr<Assets::Animation> Anim = std::make_unique<Assets::Animation>(Model->Bones.Count(), animdesc->fps);
 			Assets::AnimationCurveMode AnimCurveType = (animdesc->flags & STUDIO_DELTA) ? Assets::AnimationCurveMode::Additive : Assets::AnimationCurveMode::Absolute; // technically this should change based on flags

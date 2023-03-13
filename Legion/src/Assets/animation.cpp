@@ -880,7 +880,9 @@ void RpakLib::ExtractAnimation_V11(const RpakLoadAsset& Asset, const List<Assets
 				if (animdesc.numframes <= animdesc.unk2 || sectionFrameIdx != animdesc.numframes - 1)
 				{
 					sectionIdx = sectionFrameMinusSplitCount / animdesc.sectionframes + 1;
-					sectionFrameIdx = sectionFrameIdx - (animdesc.sectionframes * (sectionFrameMinusSplitCount / animdesc.sectionframes)) - animdesc.unk2;
+					sectionFrameIdx = sectionFrameIdx - animdesc.sectionframes * ((sectionFrameIdx - animdesc.unk2) / animdesc.sectionframes) - animdesc.unk2;
+					// piFrame -= piFrame - sectionframes * (iFrameNonStatic / sectionframes) - sectionstaticframes
+					
 				}
 				else
 				{
@@ -888,6 +890,8 @@ void RpakLib::ExtractAnimation_V11(const RpakLoadAsset& Asset, const List<Assets
 					sectionIdx = (animdesc.numframes - animdesc.unk2 - 1) / animdesc.sectionframes + 2;
 				}
 			}
+
+			printf("%s section %i frameidx %i\n", animName.ToCString(), sectionIdx, sectionFrameIdx);
 
 			// Make sure sizeof(VAR) is right datatype!!!
 			sectionOffset = animdesc.sectionindex + sizeof(int) * sectionIdx;
