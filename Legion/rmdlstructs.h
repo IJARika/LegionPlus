@@ -1239,10 +1239,12 @@ struct RMdlMaterial
 
 namespace vvd
 {
-	struct Vector4_t
+	struct Vector4D
 	{
 		float x, y, z, w;
 	};
+
+	typedef Vector4D Vector4_t;
 
 	struct mstudioweightextra_t
 	{
@@ -1295,19 +1297,63 @@ namespace vvd
 		int vertexDataStart; // offset from base to vertex block
 		int tangentDataStart; // offset from base to tangent block
 
-		vertexFileFixup_t* fixup(int i)
+		vertexFileFixup_t* const GetFixupData(int i) const
 		{
 			return reinterpret_cast<vertexFileFixup_t*>((char*)this + fixupTableStart) + i;
 		}
 
-		mstudiovertex_t* vertex(int i)
+		mstudiovertex_t* const GetVertexData(int i) const
 		{
 			return reinterpret_cast<mstudiovertex_t*>((char*)this + vertexDataStart) + i;
 		}
 
-		Vector4_t* tangent(int i)
+		Vector4D* const GetTangentData(int i) const
 		{
-			return reinterpret_cast<Vector4_t*>((char*)this + tangentDataStart) + i;
+			return reinterpret_cast<Vector4D*>((char*)this + tangentDataStart) + i;
+		}
+
+		// max / min vars for limiting what verts we want to load (tldr limit to a specific model)
+		void PerLODVertexBuffer(int lod, std::vector<mstudiovertex_t*>& verts, /*std::vector<Vector4D*>& tangs,*/ int minVert = 0, int maxVert = 0x80000) const
+		{
+			// prevent overflow
+			if (maxVert > numLODVertexes[lod])
+				maxVert = numLODVertexes[lod];
+
+			// prevent underflow
+			if (minVert < 0)
+				minVert = 0;
+
+			if (!numFixups)
+			{
+				for (int i = minVert; i < maxVert; i++)
+				{
+					verts.push_back(GetVertexData(i));
+					//tangs.push_back(GetTangentData(i));
+				}
+
+				return;
+			}
+
+			for (int i = 0; i < numFixups; i++)
+			{
+				const vertexFileFixup_t* const pFixup = GetFixupData(i);
+
+				if (pFixup->lod < lod)
+					continue;
+
+				if (pFixup->sourceVertexID < minVert)
+					continue;
+
+				if (pFixup->sourceVertexID >= maxVert)
+					break;
+
+				for (int vertIdx = 0; vertIdx < pFixup->numVertexes; vertIdx++)
+				{
+					verts.push_back(GetVertexData(pFixup->sourceVertexID + vertIdx));
+					//tangs.push_back(GetTangentData(pFixup->sourceVertexID + vertIdx));
+				}
+			}
+
 		}
 	};
 }
@@ -1337,14 +1383,55 @@ namespace vvc
 		int colorDataStart;
 		int uv2DataStart;
 
-		VertexColor_t* color(int i)
+		VertexColor_t* const GetColorData(int i) const
 		{
 			return reinterpret_cast<VertexColor_t*>((char*)this + colorDataStart) + i;
 		}
 
-		Vector2* uv2(int i)
+		Vector2* const GetUVData(int i) const
 		{
 			return reinterpret_cast<Vector2*>((char*)this + uv2DataStart) + i;
+		}
+
+		void PerLODVertexBuffer(int lod, const int numFixups, const vvd::vertexFileFixup_t* const pFixup, std::vector<VertexColor_t*>& colors, std::vector<Vector2*>& uv2s, int minVert = 0, int maxVert = 0x80000) const
+		{
+			// prevent overflow
+			if (maxVert > numLODVertexes[lod])
+				maxVert = numLODVertexes[lod];
+
+			// prevent underflow
+			if (minVert < 0)
+				minVert = 0;
+
+			if (!numFixups)
+			{
+				for (int i = minVert; i < maxVert; i++)
+				{
+					colors.push_back(GetColorData(i));
+					uv2s.push_back(GetUVData(i));
+				}
+
+				return;
+			}
+
+			for (int i = 0; i < numFixups; i++)
+			{
+				if (pFixup[i].lod < lod)
+					continue;
+
+				if (pFixup->sourceVertexID < minVert)
+					continue;
+
+				if (pFixup->sourceVertexID >= maxVert)
+					break;
+
+				for (int vertIdx = 0; vertIdx < pFixup[i].numVertexes; vertIdx++)
+				{
+					colors.push_back(GetColorData(pFixup[i].sourceVertexID + vertIdx));
+					uv2s.push_back(GetUVData(pFixup[i].sourceVertexID + vertIdx));
+				}
+			}
+
 		}
 	};
 }
@@ -1628,11 +1715,14 @@ namespace titanfall2
 		int unused[8];
 	};
 
+	struct mstudiomodel_t;
+
 	struct mstudiomesh_t
 	{
 		int material;
 
 		int modelindex;
+		mstudiomodel_t* const pModel() const { return reinterpret_cast<mstudiomodel_t* const>((char*)this + modelindex); }
 
 		int numvertices; // number of unique vertices/normals/texcoords
 		int vertexoffset; // vertex mstudiovertex_t

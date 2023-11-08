@@ -75,159 +75,107 @@ void MdlLib::ExtractValveVertexData(titanfall2::studiohdr_t* pHdr, vtx::FileHead
 {
 	for (int i = 0; i < pVtx->numLODs; i++)
 	{
-		std::vector<vvd::mstudiovertex_t*> vvdVerts;
-		std::vector<vvc::VertexColor_t*> vvcColors;
-		std::vector<Vector2*> vvcUV2s;
-
-		int vertexOffset = 0;
-
-		// rebuild vertex vector per lod just incase it has fixups
-		if (pVVD->numFixups)
-		{
-			for (int j = 0; j < pVVD->numFixups; j++)
-			{
-				vvd::vertexFileFixup_t* vertexFixup = pVVD->fixup(j);
-
-				if (vertexFixup->lod >= i)
-				{
-					for (int k = 0; k < vertexFixup->numVertexes; k++)
-					{
-						vvd::mstudiovertex_t* vvdVert = pVVD->vertex(vertexFixup->sourceVertexID + k);
-
-						vvdVerts.push_back(vvdVert);
-
-						// vvc
-						if (pVVC)
-						{
-							// doesn't matter which we pack as long as it has vvc, we will only used what's needed later
-							vvc::VertexColor_t* vvcColor = pVVC->color(vertexFixup->sourceVertexID + k);
-							Vector2* vvcUV2 = pVVC->uv2(vertexFixup->sourceVertexID + k);
-
-							vvcColors.push_back(vvcColor);
-							vvcUV2s.push_back(vvcUV2);
-						}
-					}
-				}
-			}
-		}
-		else
-		{
-			// using per lod vertex count may have issues (tbd)
-			for (int j = 0; j < pVVD->numLODVertexes[i]; j++)
-			{
-				vvd::mstudiovertex_t* vvdVert = pVVD->vertex(j);
-
-				vvdVerts.push_back(vvdVert);
-
-				// vvc
-				if (pVVC)
-				{
-					// doesn't matter which we pack as long as it has vvc, we will only used what's needed later
-					vvc::VertexColor_t* vvcColor = pVVC->color(j);
-					Vector2* vvcUV2 = pVVC->uv2(j);
-
-					vvcColors.push_back(vvcColor);
-					vvcUV2s.push_back(vvcUV2);
-				}
-			}
-		}
-
-		// some basic error checks to avoid crashes
-		if (vvdVerts.empty() || (vvcColors.empty() && (pHdr->flags & STUDIOHDR_FLAGS_USES_VERTEX_COLOR)) || (vvcUV2s.empty() && (pHdr->flags & STUDIOHDR_FLAGS_USES_UV2)))
-			return;
-
 		// eventually we should do checks on all of these to confirm they match
-		for (int j = 0; j < pHdr->numbodyparts; j++)
+		for (int bodypartIdx = 0; bodypartIdx < pHdr->numbodyparts; bodypartIdx++)
 		{
-			titanfall2::mstudiobodyparts_t* mdlBodypart = pHdr->mdlBodypart(j);
-			vtx::BodyPartHeader_t* vtxBodypart = pVtx->vtxBodypart(j);
+			titanfall2::mstudiobodyparts_t* pBodyPart = pHdr->mdlBodypart(bodypartIdx);
+			vtx::BodyPartHeader_t* pBodypartVert = pVtx->vtxBodypart(bodypartIdx);
 
-			for (int k = 0; k < mdlBodypart->nummodels; k++)
+			for (int modelIdx = 0; modelIdx < pBodyPart->nummodels; modelIdx++)
 			{
-				titanfall2::mstudiomodel_t* mdlModel = mdlBodypart->mdlModel(k);
-				vtx::ModelHeader_t* vtxModel = vtxBodypart->vtxModel(k);
+				titanfall2::mstudiomodel_t* pModel = pBodyPart->mdlModel(modelIdx);
+				vtx::ModelHeader_t* pModelVert = pBodypartVert->vtxModel(modelIdx);
 
 				// lod
-				vtx::ModelLODHeader_t* vtxLod = vtxModel->vtxLOD(i);
+				vtx::ModelLODHeader_t* pLodVert = pModelVert->vtxLOD(i);
 
-				for (int l = 0; l < mdlModel->nummeshes; l++)
+				for (int meshIdx = 0; meshIdx < pModel->nummeshes; meshIdx++)
 				{
-					titanfall2::mstudiomesh_t* mdlMesh = mdlModel->mdlMesh(l);
-					vtx::MeshHeader_t* vtxMesh = vtxLod->vtxMesh(l);
+					titanfall2::mstudiomesh_t* pMesh = pModel->mdlMesh(meshIdx);
+					vtx::MeshHeader_t* pMeshVert = pLodVert->vtxMesh(meshIdx);
 
 					// so we don't make empty meshes
-					if (mdlMesh->vertexloddata.numLODVertexes[i] > 0)
+					if (!pMeshVert->numStripGroups)
+						continue;
+
+					// maxinfluences is max weights, check if has extra weights, if yes 16 weights max, if no 3 weights max
+					// also sets uv count depending on flags
+					Assets::Mesh& exportMesh = ExportModel->Meshes.Emplace(((pHdr->flags & STUDIOHDR_FLAGS_USES_EXTRA_BONE_WEIGHTS) && (pHdr->version == 54)) ? MAX_NUM_EXTRA_BONE_WEIGHTS : MAX_NUM_BONES_PER_VERT, (pHdr->flags & STUDIOHDR_FLAGS_USES_UV2) ? 2 : 1); // set uv count, two uvs used rarely in v53
+
+					// set "texture" aka material
+					titanfall2::mstudiotexture_t* pMaterial = pHdr->texture(pMesh->material);
+					exportMesh.MaterialIndices.EmplaceBack(ExportModel->AddMaterial(IO::Path::GetFileNameWithoutExtension(pMaterial->textureName()), ""));
+
+					std::vector<vvd::mstudiovertex_t*> vvdVerts;
+					std::vector<vvc::VertexColor_t*> vvcColors;
+					std::vector<Vector2*> vvcUV2s;
+
+					int baseVertexOffset = (pMesh->pModel()->vertexindex / sizeof(vvd::mstudiovertex_t)) + pMesh->vertexoffset;
+
+					pVVD->PerLODVertexBuffer(i, vvdVerts, baseVertexOffset, baseVertexOffset + pMesh->numvertices);
+					
+					if (pVVC)
+						pVVC->PerLODVertexBuffer(i, pVVD->numFixups, pVVD->GetFixupData(0), vvcColors, vvcUV2s, baseVertexOffset, baseVertexOffset + pMesh->numvertices);
+
+					for (int stripGrpIdx = 0; stripGrpIdx < pMeshVert->numStripGroups; stripGrpIdx++)
 					{
-						// maxinfluences is max weights, check if has extra weights, if yes 16 weights max, if no 3 weights max
-						// also sets uv count depending on flags
-						Assets::Mesh& exportMesh = ExportModel->Meshes.Emplace(((pHdr->flags & STUDIOHDR_FLAGS_USES_EXTRA_BONE_WEIGHTS) && (pHdr->version == 54)) ? MAX_NUM_EXTRA_BONE_WEIGHTS : MAX_NUM_BONES_PER_VERT, (pHdr->flags & STUDIOHDR_FLAGS_USES_UV2) ? 2 : 1); // set uv count, two uvs used rarely in v53
+						vtx::StripGroupHeader_t* pStripGrp = pMeshVert->vtxStripGrp(stripGrpIdx);
 
-						// set "texture" aka material
-						titanfall2::mstudiotexture_t* meshMaterial = pHdr->texture(mdlMesh->material);
-						exportMesh.MaterialIndices.EmplaceBack(ExportModel->AddMaterial(IO::Path::GetFileNameWithoutExtension(meshMaterial->textureName()), ""));
-
-						for (int m = 0; m < vtxMesh->numStripGroups; m++)
+						for (int n = 0; n < pStripGrp->numVerts; n++)
 						{
-							vtx::StripGroupHeader_t* vtxStripGroup = vtxMesh->vtxStripGrp(m);
+							vtx::Vertex_t* pVertVTX = pStripGrp->vtxVert(n);
+							const vvd::mstudiovertex_t* const pVertVVD = vvdVerts.at(pVertVTX->origMeshVertID);
 
-							for (int n = 0; n < vtxStripGroup->numVerts; n++)
+							Assets::VertexColor vertexColor;
+
+							// inserts color data into mesh if needed
+							if (pHdr->flags & STUDIOHDR_FLAGS_USES_VERTEX_COLOR)
 							{
-								vtx::Vertex_t* vtxVert = vtxStripGroup->vtxVert(n);
-								vvd::mstudiovertex_t* vvdVert = vvdVerts.at(vertexOffset + vtxVert->origMeshVertID);
+								const vvc::VertexColor_t* const vvcColor = vvcColors.at(pVertVTX->origMeshVertID);
+								vertexColor = Assets::VertexColor::VertexColor(vvcColor->r, vvcColor->g, vvcColor->b, vvcColor->a);
+							}
 
-								Assets::VertexColor vertexColor;
+							Assets::Vertex newVert = exportMesh.Vertices.Emplace(pVertVVD->m_vecPosition, pVertVVD->m_vecNormal, vertexColor, pVertVVD->m_vecTexCoord);
 
-								// inserts color data into mesh if needed
-								if (pHdr->flags & STUDIOHDR_FLAGS_USES_VERTEX_COLOR)
+							// inserts uv data into mesh if needed, should work but needs testing
+							if (pHdr->flags & STUDIOHDR_FLAGS_USES_UV2)
+							{
+								const Vector2* const vvcUV2 = vvcUV2s.at(pVertVTX->origMeshVertID);
+								newVert.SetUVLayer(*vvcUV2, 1);
+							}
+
+							// check if this model has extra bone weights (verts exceeding three bone weights), extra weights part untested
+							if ((pHdr->flags & STUDIOHDR_FLAGS_USES_EXTRA_BONE_WEIGHTS) && (pHdr->version == STUDIO_VERSION_APEX_LEGENDS))
+							{
+								for (char w = 0; w < pVertVVD->m_BoneWeights.numbones; w++)
 								{
-									vvc::VertexColor_t* vvcColor = vvcColors.at(vertexOffset + vtxVert->origMeshVertID);
-									vertexColor = Assets::VertexColor::VertexColor(vvcColor->r, vvcColor->g, vvcColor->b, vvcColor->a);
-								}
-
-								Assets::Vertex newVert = exportMesh.Vertices.Emplace(vvdVert->m_vecPosition, vvdVert->m_vecNormal, vertexColor, vvdVert->m_vecTexCoord);
-
-								// inserts uv data into mesh if needed, should work but needs testing
-								if (pHdr->flags & STUDIOHDR_FLAGS_USES_UV2)
-								{
-									Vector2* vvcUV2 = vvcUV2s.at(vertexOffset + vtxVert->origMeshVertID);
-									newVert.SetUVLayer(*vvcUV2, 1);
-								}
-
-								// check if this model has extra bone weights (verts exceeding three bone weights), extra weights part untested
-								if ((pHdr->flags & STUDIOHDR_FLAGS_USES_EXTRA_BONE_WEIGHTS) && (pHdr->version == STUDIO_VERSION_APEX_LEGENDS))
-								{
-									for (char w = 0; w < vvdVert->m_BoneWeights.numbones; w++)
+									if (w >= 3)
 									{
-										if (w >= 3)
-										{
-											newVert.SetWeight({ (uint32_t)(pVVW->GetWeightData(vvdVert->m_BoneWeights.weightextra.extraweightindex + (w - 3))->bone), static_cast<float>(pVVW->GetWeightData(vvdVert->m_BoneWeights.weightextra.extraweightindex + (w - 3))->weight / 32767.0) }, w);
-										}
-										else
-										{
-											newVert.SetWeight({ vvdVert->m_BoneWeights.bone[w], static_cast<float>(vvdVert->m_BoneWeights.weightextra.weight[w] / 32767.0) }, w);
-										}
+										newVert.SetWeight({ (uint32_t)(pVVW->GetWeightData(pVertVVD->m_BoneWeights.weightextra.extraweightindex + (w - 3))->bone), static_cast<float>(pVVW->GetWeightData(pVertVVD->m_BoneWeights.weightextra.extraweightindex + (w - 3))->weight / 32767.0) }, w);
 									}
-								}
-								else // do weights normally is flag isn't set, this is pretty straight forward thankfully
-								{
-									for (char w = 0; w < vvdVert->m_BoneWeights.numbones; w++)
+									else
 									{
-										newVert.SetWeight({ vvdVert->m_BoneWeights.bone[w], vvdVert->m_BoneWeights.weight[w] }, w);
+										newVert.SetWeight({ pVertVVD->m_BoneWeights.bone[w], static_cast<float>(pVertVVD->m_BoneWeights.weightextra.weight[w] / 32767.0) }, w);
 									}
 								}
 							}
-
-							for (int n = 0; n < vtxStripGroup->numIndices; n += 3)
+							else // do weights normally is flag isn't set, this is pretty straight forward thankfully
 							{
-								unsigned short i1 = *vtxStripGroup->vtxIndice(n);
-								unsigned short i2 = *vtxStripGroup->vtxIndice(n + 1);
-								unsigned short i3 = *vtxStripGroup->vtxIndice(n + 2);
-
-								exportMesh.Faces.EmplaceBack(i1, i2, i3);
+								for (char w = 0; w < pVertVVD->m_BoneWeights.numbones; w++)
+								{
+									newVert.SetWeight({ pVertVVD->m_BoneWeights.bone[w], pVertVVD->m_BoneWeights.weight[w] }, w);
+								}
 							}
 						}
 
-						vertexOffset += mdlMesh->vertexloddata.numLODVertexes[i];
+						for (int n = 0; n < pStripGrp->numIndices; n += 3)
+						{
+							unsigned short i1 = *pStripGrp->vtxIndice(n);
+							unsigned short i2 = *pStripGrp->vtxIndice(n + 1);
+							unsigned short i3 = *pStripGrp->vtxIndice(n + 2);
+
+							exportMesh.Faces.EmplaceBack(i1, i2, i3);
+						}
 					}
 				}
 			}
